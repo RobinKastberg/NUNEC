@@ -1,10 +1,12 @@
-#include <windows.h>
 #define GLEW_STATIC
+#define _CRT_SECURE_NO_WARNINGS
+#include <windows.h>
+
 #include "glew.h"
 #include "transform.h"
 #include <math.h>
 #include "omp.h"
-
+#include <stdio.h>
 #include <GL/GL.h>
 #pragma comment (lib, "opengl32.lib")
 #pragma comment (lib, "glew\\glew32s.lib")
@@ -21,7 +23,7 @@ __declspec(align(16)) struct cell {
 
 	// Material parameters
 	float muxx, muyy, muzz, mat;
-	float epsxx, epsyy, epszz, __11;
+	float epsxx, epsyy, epszz, pec;
 
 	// precomputed constants
 	float Mhx1, Mhx2, Mhx3, Mhx4;
@@ -61,7 +63,7 @@ vec3 CE;\n\
 vec3 D;\n\
 vec3 E;\n\
 vec4 mu;\n\
-vec3 eps;\n\
+vec4 eps;\n\
 vec4 Mhx;\n\
 vec4 Mhy;\n\
 vec4 Mhz;\n\
@@ -73,22 +75,21 @@ vec3 ICh;\n\
 vec3 Ih;\n\
 vec3 Id;\n\
 } ;\n"\
-"layout(std430, binding = 2) buffer shader_data {\n\
+"layout(std140, binding = 2) coherent buffer shader_data {\n\
 	cell vertex[];\n\
 };\n"\
-"layout(local_size_x=1, local_size_y=1, local_size_z=1) in;\n"\
+"layout(local_size_x=1, local_size_y=1, local_size_z=16) in;\n"\
 "layout(rgba8, location = 0) uniform image3D sim;\n"\
 "uniform int ks;\n"\
 "uniform int ke;\n"\
 "uniform int curstep;\n"\
 "uniform float dx;\n"\
+"uniform float dt;\n"\
 "void main() {\n"\
-"uint x = gl_WorkGroupID.x;\n"\
-"uint y = gl_WorkGroupID.y;\n"\
-"uint z = gl_WorkGroupID.z;\n"\
+"uint x = gl_GlobalInvocationID.x;\n"\
+"uint y = gl_GlobalInvocationID.y;\n"\
+"uint z = gl_GlobalInvocationID.z;\n"\
 "uint off = ke * ke * x + ke * y + z;\n"\
-"memoryBarrierBuffer();\n"\
-"barrier();\n"\
 "float plusXEy = (x == (ke - 1)) ? 0 : vertex[off + ke*ke].E.y;\n"\
 "float plusXEz = (x == (ke - 1)) ? 0 : vertex[off + ke*ke].E.z;\n"\
 "float plusYEz = (y == (ke - 1)) ? 0 : vertex[off + ke].E.z;\n"\
@@ -100,10 +101,23 @@ vec3 Id;\n\
 "vertex[off].CE.z = -(plusYEx - vertex[off].E.x - plusXEy + vertex[off].E.y) / dx;\n"\
 "memoryBarrierBuffer();\n"\
 "barrier();\n"\
-"vertex[off].ICe += vertex[off].CE;\n"\
-"vertex[off].Ih += vertex[off].H; \n"\
+"//float source = 6*exp(-0.5*(curstep-250.0)*(curstep-250.0)/(100000));\n"
+"float Hsource = sin(2*3.1415*dt*curstep*1e7);\n"
+"float Esource = sin(2*3.1415*dt*(curstep+0.5)*1e7);\n"
+"float Ex_src = Esource;\n" // E-Source
+"float Ey_src = Esource;\n" // H-Source
+"float Hx_src = -Hsource;\n" // E-Source
+"float Hy_src = Hsource;\n" // H-Source
+
+"barrier();\n"\
+"if(z == 17 && (x == ks || x== ks+1) && (y == ks || y == ks+1)) {"\
+"vertex[off].CE.x += Ey_src;\n"\
+"vertex[off].CE.y -= Ex_src;\n"\
+"}"\
 "memoryBarrierBuffer();\n"\
 "barrier();\n"\
+"vertex[off].ICe += vertex[off].CE;\n"\
+"vertex[off].Ih += vertex[off].H; \n"\
 "vertex[off].H.x = dot(vertex[off].Mhx, vec4(vertex[off].H.x, \n\
 											vertex[off].CE.x, \n\
 											vertex[off].ICe.x, \n\
@@ -117,7 +131,6 @@ vec3 Id;\n\
 								vertex[off].ICe.z, \n\
 								vertex[off].Ih.z));\n"\
 	"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
 	"float minXHy = (x == 0) ? 0 : vertex[off - ke*ke].H.y;\n"\
 	"float minXHz = (x == 0) ? 0 : vertex[off - ke*ke].H.z;\n"\
 	"float minYHz = (y == 0) ? 0 : vertex[off - ke].H.z;\n"\
@@ -128,11 +141,16 @@ vec3 Id;\n\
 	"vertex[off].CH.y = (minXHz - vertex[off].H.z - minZHx + vertex[off].H.x) / dx;\n"\
 	"vertex[off].CH.z = (minYHx - vertex[off].H.x - minXHy + vertex[off].H.y) / dx;\n"\
 	"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
+
+	"if(z == 16 && (x == ks || x== ks+1) && (y == ks || y == ks+1)) {"\
+	"vertex[off].CH.x += Hy_src;\n"\
+	"vertex[off].CH.y -= Hx_src;\n"\
+	"}"\
+
+	"memoryBarrierBuffer();\n"\
+
 	"vertex[off].ICh += vertex[off].CH;\n"\
 	"vertex[off].Id += vertex[off].D; \n"\
-	"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
 	"vertex[off].D.x = dot(vertex[off].Mdx, vec4(vertex[off].D.x, \n\
 										vertex[off].CH.x, \n\
 										vertex[off].ICh.x, \n\
@@ -145,25 +163,14 @@ vec3 Id;\n\
 									vertex[off].CH.z, \n\
 									vertex[off].ICh.z, \n\
 									vertex[off].Id.z));\n"\
-		"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
-	"vertex[off].E = vertex[off].D / vertex[off].eps;\n"\
+	"float pec = vertex[off].eps.w;\n"\
 	"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
-	"if(curstep < 2000 && off == 0) {"\
-	"vertex[ks*ke*ke + ks*ke + ks].E.z += 20*sin(2*3.14*curstep/400);\n"\
-	"vertex[ks*ke*ke + (ks+1)*ke + ks].E.z += 20*sin(2*3.14*curstep/400);\n"\
-	"vertex[(ks+1)*ke*ke + (ks+1)*ke + ks].E.z += 20*sin(2*3.14*curstep/400);\n"\
-	"vertex[(ks+1)*ke*ke + (ks)*ke + ks].E.z += 20*sin(2*3.14*curstep/400);\n"\
-	"}"\
-
-	"memoryBarrierBuffer();\n"\
-	"barrier();\n"\
-
+	"vertex[off].E = pec * vertex[off].D / vec3(vertex[off].eps);\n"\
 	"vec3 E = vertex[off].E;\n"\
-	"vec3 H = 2*vertex[off].H;\n"\
-	"vec3 P = 0.5*cross(E, H);\n"\
-	"imageStore(sim, ivec3(gl_WorkGroupID), vec4(vertex[off].mu.w+length(P), length(E), length(H), vertex[off].mu.w));\n"\
+	"vec3 H = 300*vertex[off].H;\n"\
+	"vec3 P = cross(E, H);\n"\
+	"imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+log(1+length(P)), 20*log(1+length(E)), 20*log(1+length(H)), vertex[off].mu.w));\n"\
+	"//imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+length(P), length(E), 0, 0));\n"\
 	""\
 "}";
 
@@ -187,7 +194,7 @@ const char *frag_shader = \
 "vec3 ray_pos = position;\n"\
 "vec3 pos111 = vec3(1.0, 1.0, 1.0);\n"\
 "vec3 pos000 = vec3(0.0, 0.0, 0.0);\n"\
-"const float sample_step = 0.05;\n"\
+"const float sample_step = 0.01;\n"\
 "const float val_threshold = 1;\n"\
 "vec4 color;\n"\
 "vec4 frag_color = vec4(0.0, 0.0, 0.0, 0.0);\n"\
@@ -202,10 +209,12 @@ const char *frag_shader = \
 "        // break out if ray reached the end of the cube.\n"\
 "        if (max(max(ray_pos.x, ray_pos.y),ray_pos.z) > 1.0 || min(min(ray_pos.x, ray_pos.y),ray_pos.z) < -1.0)\n"\
 "            break;\n" //  0.3125 + 0.375*
-"        float E =  texture(myTextureSampler, 0.3125 + 0.375*(vec3(1)+ray_pos)/2.0).g;\n"\
-"        float H =  texture(myTextureSampler, 0.3125 + 0.375*(vec3(1)+ray_pos)/2.0).b;\n"\
-"        float mat =  texture(myTextureSampler, 0.3125 + 0.375*(vec3(1)+ray_pos)/2.0).a;\n"\
-"		 float density = 10*sample_step*texture(myTextureSampler,0.3125 + 0.375*(vec3(1)+ray_pos)/2.0).r;\n"\
+"		 if(length(ray_pos - cameraPosition) < 1)\n"
+"			break;\n"
+"        float E =  texture(myTextureSampler, (vec3(1)+ray_pos)/2.0).g;\n"\
+"        float H =  texture(myTextureSampler,(vec3(1)+ray_pos)/2.0).b;\n"\
+"        float mat =  texture(myTextureSampler, (vec3(1)+ray_pos)/2.0).a;\n"\
+"		 float density = 10*sample_step*texture(myTextureSampler,(vec3(1)+ray_pos)/2.0).r;\n"\
 "\n"\
 "        color.rgb = clamp(E*vec3(1,0,0) + H*vec3(0,0,1) + mat*vec3(0,1,0),0,1);\n"\
 "		 color.a = density;\n"\
@@ -264,7 +273,8 @@ int nsteps = 100;
 int ks = 32;
 
 float c0 = 299792458;
-float dx = 0.0001;
+float frmax = 1e6;
+float dx = 2.34; //  c0 / (frmax * 100);
 float dt;
 float eps = 8.8541878176e-12;
 float mu = 1.256637e-6;
@@ -272,6 +282,8 @@ float mu = 1.256637e-6;
 float Ca, Cb, Da, Db;
 
 struct cell (*sim)[ke][ke][ke];
+struct cell(*sim_gpu)[ke][ke][ke];
+
 int curstep = 0;
 
 GLuint textureID;
@@ -289,6 +301,21 @@ vec3 up = vec3{ 0, 0, 1 };
 int L = 16;
 float pml(int k)
 {
+	int NXLO = L - 1;
+	int NXHI = ke - 1 - L;
+	if (k < (L))
+		k = (k - L);
+	else if (k >(ke - 1 - L))
+		k = k - (ke - 1 - L);
+	else
+		k = 0;
+
+	k = abs(k);
+
+	return pow(k / L, 3.0);
+}
+float pmlD(int k)
+{
 	int NXLO = L - 1 ;
 	int NXHI = ke - 1 - L;
 	if (k < (L))
@@ -299,9 +326,24 @@ float pml(int k)
 		k = 0;
 
 	k = abs(k);
-	return eps*k*k*k / (L*L*L * 2 * dt * 75);
-}
 
+	return (eps / (10*dt))*pow(k/L, 3.0);
+}
+float pmlH(int k)
+{
+	int NXLO = L - 1;
+	int NXHI = ke - 1 - L;
+	if (k < (L))
+		k = (k - L);
+	else if (k >(ke - 1 - L))
+		k = k - (ke - 1 - L);
+	else
+		k = 0;
+
+	k = abs(k);
+
+	return (eps / (10 *dt))*pow(k / L, 3.0);
+}
 GLuint ssbo;
 
 void init()
@@ -312,7 +354,7 @@ void init()
 	glGenBuffers(1, &ssbo);
 
 
-	dt = dx / (10*sqrtf(3.0f) * c0);
+	dt = dx / (20*sqrtf(3.0f) * c0);
 	//dt = 1.6678e-10;
 	//dt = dx;
 	ZeroMemory(sim, bsize);
@@ -336,50 +378,72 @@ void init()
 				}*/
 				//else {
 					// TODO: Fungerar inte än.
-				rhoHx = rhoDx = pml(x); //  pml(x);
-				rhoHy = rhoDy = pml(y); //  pml(x);
-				rhoHz = rhoDz = pml(z); //  pml(x);
-					
+				rhoHx = pmlH(x); //  pml(x);
+				rhoHy = pmlH(y); //  pml(x);
+				rhoHz = pmlH(z); //  pml(x);
+
+				rhoDx = pmlD(x); //  pml(x);
+				rhoDy = pmlD(y); //  pml(x);
+				rhoDz = pmlD(z); //  pml(x);
+
 				//}
-				if (x == ks && y == ks && (z > L || z < ke-1-L)) {
+
+				(*sim)[x][y][z].pec = 1;					
+				(*sim)[x][y][z].epsxx = 1;
+				(*sim)[x][y][z].epsyy = 1;
+				(*sim)[x][y][z].epszz = 1;
+				(*sim)[x][y][z].muxx = 1;
+				(*sim)[x][y][z].muyy = 1;
+				(*sim)[x][y][z].muzz = 1;
+				//(*sim)[x][y][z].mat = (pml(y)+ pml(x) + pml(z))*0.5;
+
+				if (z == L)
+				{
 					(*sim)[x][y][z].epsxx = 1e5;
 					(*sim)[x][y][z].epsyy = 1e5;
 					(*sim)[x][y][z].epszz = 1e5;
 					(*sim)[x][y][z].mat = 1;
+					(*sim)[x][y][z].pec = 0;
+				}
+				if (x == ks && y == ks && (z > L && z < ke-1-L - 5)) {
+					(*sim)[x][y][z].epsxx = 1e5;
+					(*sim)[x][y][z].epsyy = 1e5;
+					(*sim)[x][y][z].epszz = 1e5;
+					(*sim)[x][y][z].mat = 1;
+					(*sim)[x][y][z].pec = 0;
+
 
 					(*sim)[x+1][y][z].epsxx = 1e5;
 					(*sim)[x+1][y][z].epsyy = 1e5;
 					(*sim)[x+1][y][z].epszz = 1e5;
 					(*sim)[x+1][y][z].mat = 1;
+					(*sim)[x+1][y][z].pec = 0;
 
 					(*sim)[x][y+1][z].epsxx = 1e5;
 					(*sim)[x][y+1][z].epsyy = 1e5;
 					(*sim)[x][y + 1][z].epszz = 1e5;
 					(*sim)[x][y + 1][z].mat = 1;
+					(*sim)[x][y + 1][z].pec = 0;
 
-					(*sim)[x + 1][y + 1][z].epsxx = 1e5;
-					(*sim)[x + 1][y + 1][z].epsyy = 1e5;
-					(*sim)[x + 1][y + 1][z].epszz = 1e5;
+
+
 					(*sim)[x + 1][y + 1][z].mat = 1;
-				}
-				else {
-					(*sim)[x][y][z].epsxx = 1;
-					(*sim)[x][y][z].epsyy = 1;
-					(*sim)[x][y][z].epszz = 1;
+					(*sim)[x + 1][y + 1][z].pec = 0;
+
 				}
 
-				(*sim)[x][y][z].muxx = 1;
-				(*sim)[x][y][z].muyy = 1;
-				(*sim)[x][y][z].muzz = 1;
+				
 
 
-				float Mhx0 = (1.0 / dt) + ((rhoHy + rhoHz) / (2 * eps)) + rhoHy*rhoHz*dt / (4 * eps*eps);
-				float Mhy0 = (1.0 / dt) + ((rhoHx + rhoHz) / (2 * eps)) + rhoHx*rhoHz*dt / (4 * eps*eps);
-				float Mhz0 = (1.0 / dt) + ((rhoHx + rhoHy) / (2 * eps)) + rhoHx*rhoHy*dt / (4 * eps*eps);
 
-				(*sim)[x][y][z].Mhx1 = (1 / Mhx0) * ((1.0 / dt) - ((rhoHy + rhoHz) / (2 * eps)) - rhoHy*rhoHz*dt / (4 * eps*eps));
-				(*sim)[x][y][z].Mhy1 = (1 / Mhy0) * ((1.0 / dt) - ((rhoHx + rhoHz) / (2 * eps)) - rhoHx*rhoHz*dt / (4 * eps*eps));
-				(*sim)[x][y][z].Mhz1 = (1 / Mhz0) * ((1.0 / dt) - ((rhoHx + rhoHy) / (2 * eps)) - rhoHx*rhoHy*dt / (4 * eps*eps));
+
+				double Mhx0 = (1.0 / dt) + ((rhoHy + rhoHz) / (2.0 * eps)) + rhoHy*rhoHz*dt / (4.0 * eps*eps);
+				double Mhy0 = (1.0 / dt) + ((rhoHx + rhoHz) / (2.0 * eps)) + rhoHx*rhoHz*dt / (4.0 * eps*eps);
+				double Mhz0 = (1.0 / dt) + ((rhoHx + rhoHy) / (2.0 * eps)) + rhoHx*rhoHy*dt / (4.0 * eps*eps);
+
+				(*sim)[x][y][z].Mhx1 = (1.0 / Mhx0) * ((1.0 / dt) - ((rhoHy + rhoHz) / (2.0 * eps)) - rhoHy*rhoHz*dt / (4.0 * eps*eps));
+				(*sim)[x][y][z].Mhy1 = (1.0 / Mhy0) * ((1.0 / dt) - ((rhoHx + rhoHz) / (2.0 * eps)) - rhoHx*rhoHz*dt / (4.0 * eps*eps));
+				(*sim)[x][y][z].Mhz1 = (1.0 / Mhz0) * ((1.0 / dt) - ((rhoHx + rhoHy) / (2.0 * eps)) - rhoHx*rhoHy*dt / (4.0 * eps*eps));
 
 				(*sim)[x][y][z].Mhx2 = -c0 / (Mhx0 * (*sim)[x][y][z].muxx);
 				(*sim)[x][y][z].Mhy2 = -c0 / (Mhy0 * (*sim)[x][y][z].muyy);
@@ -393,7 +457,26 @@ void init()
 				(*sim)[x][y][z].Mhy4 = -(dt*rhoHx*rhoHz) / (Mhy0*eps*eps);
 				(*sim)[x][y][z].Mhz4 = -(dt*rhoHy*rhoHx) / (Mhz0*eps*eps);
 
+				if (x == 0 && y == 0 && z == 0)
+				{
+					printf("Mhx0: %e\n", (float)Mhx0);
+					printf("Mhx1: %e\n", (float)(*sim)[x][y][z].Mhx1);
+					printf("Mhx2: %e\n", (float)(*sim)[x][y][z].Mhx2);
+					printf("Mhx3: %e\n", (float)(*sim)[x][y][z].Mhx3);
+					printf("Mhx4: %e\n", (float)(*sim)[x][y][z].Mhx4);
+					printf("Mhx4(taljare): %e\n", (dt*rhoHy*rhoHz));
+					printf("Mhx4(namnare): %e\n", (Mhz0*eps*eps));
 
+
+					printf("dt: %e\n", dt);
+					printf("1/dt: %e\n", 1.0 / dt);
+					printf("rhoHx: %e\n", rhoHx);
+					printf("rhoHy: %e\n", rhoHx);
+					printf("rhoHz: %e\n", rhoHx);
+					printf("eps: %e\n", eps);
+					printf("c0: %e\n", c0);
+
+				}
 
 
 
@@ -402,22 +485,37 @@ void init()
 				float Mdy0 = (1.0 / dt) + ((rhoDx + rhoDz) / (2 * eps)) + rhoDx*rhoDz*dt / (4 * eps*eps);
 				float Mdz0 = (1.0 / dt) + ((rhoDx + rhoDy) / (2 * eps)) + rhoDx*rhoDy*dt / (4 * eps*eps);
 
-				(*sim)[x][y][z].Mdx1 = (1 / Mdx0) * ((1.0 / dt) - ((rhoDy + rhoDz) / (2 * eps)) - rhoDy*rhoDz*dt / (4 * eps*eps));
-				(*sim)[x][y][z].Mdy1 = (1 / Mdy0) * ((1.0 / dt) - ((rhoDx + rhoDz) / (2 * eps)) - rhoDx*rhoDz*dt / (4 * eps*eps));
-				(*sim)[x][y][z].Mdz1 = (1 / Mdz0) * ((1.0 / dt) - ((rhoDx + rhoDy) / (2 * eps)) - rhoDx*rhoDy*dt / (4 * eps*eps));
+				(*sim)[x][y][z].Mdx1 = (1.0 / Mdx0) * ((1.0 / dt) - ((rhoDy + rhoDz) / (2 * eps)) - rhoDy*rhoDz*dt / (4 * eps*eps));
+				(*sim)[x][y][z].Mdy1 = (1.0 / Mdy0) * ((1.0 / dt) - ((rhoDx + rhoDz) / (2 * eps)) - rhoDx*rhoDz*dt / (4 * eps*eps));
+				(*sim)[x][y][z].Mdz1 = (1.0 / Mdz0) * ((1.0 / dt) - ((rhoDx + rhoDy) / (2 * eps)) - rhoDx*rhoDy*dt / (4 * eps*eps));
 
 				(*sim)[x][y][z].Mdx2 =  c0 / (Mdx0);
 				(*sim)[x][y][z].Mdy2 =  c0 / (Mdy0);
 				(*sim)[x][y][z].Mdz2 =  c0 / (Mdz0);
 
-				(*sim)[x][y][z].Mdx3 =  -(c0*dt*rhoDx) / (Mdx0*eps);
-				(*sim)[x][y][z].Mdy3 =  -(c0*dt*rhoDy) / (Mdy0*eps);
-				(*sim)[x][y][z].Mdz3 =  -(c0*dt*rhoDz) / (Mdz0*eps);
+				(*sim)[x][y][z].Mdx3 =  (c0*dt*rhoDx) / (Mdx0*eps);
+				(*sim)[x][y][z].Mdy3 =  (c0*dt*rhoDy) / (Mdy0*eps);
+				(*sim)[x][y][z].Mdz3 =  (c0*dt*rhoDz) / (Mdz0*eps);
 
 				(*sim)[x][y][z].Mdx4 = -(dt*rhoDy*rhoDz) / (Mdx0*eps*eps);
 				(*sim)[x][y][z].Mdy4 = -(dt*rhoDx*rhoDz) / (Mdy0*eps*eps);
 				(*sim)[x][y][z].Mdz4 = -(dt*rhoDy*rhoDx) / (Mdz0*eps*eps);
 
+				if (x == 0 && y == 0 && z == 0)
+				{
+					printf("Mdx0: %e\n", (float)Mdx0);
+					printf("Mdx1: %e\n", (float)(*sim)[x][y][z].Mdx1);
+					printf("Mdx2: %e\n", (float)(*sim)[x][y][z].Mdx2);
+					printf("Mdx3: %e\n", (float)(*sim)[x][y][z].Mdx3);
+					printf("Mdx4: %e\n", (float)(*sim)[x][y][z].Mdx4);
+					printf("Mdx4(taljare): %e\n", (dt*rhoDy*rhoDz));
+					printf("Mdx4(namnare): %e\n", (Mdz0*eps*eps));
+
+					printf("rhoDx: %e\n", rhoDx);
+					printf("rhoDy: %e\n", rhoDx);
+					printf("rhoDz: %e\n", rhoDx);
+
+				}
 			}
 		}
 	}
@@ -532,7 +630,8 @@ void init()
 	//glEnable(GL_BLEND);
 
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, bsize, sim, GL_DYNAMIC_COPY);
+	glBufferStorage(GL_SHADER_STORAGE_BUFFER, bsize, sim,  GL_MAP_READ_BIT);
+	//glBufferData(GL_SHADER_STORAGE_BUFFER, bsize, sim, GL_STATIC_DRAW);
 	free(sim);
 }
 
@@ -768,9 +867,30 @@ void step()
 	*/
 }
 HWND wnd;
+void peek(int x, int y, int z)
+{
+	volatile struct cell peek;
+	glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, (ke*ke*x + ke*y + z)*sizeof(struct cell), sizeof(struct cell), (void *)&peek);
+	printf("CELL: (%02d,%02d,%02d)\n", x, y, z);
+	printf("Ex: %f\n", peek.Ex);
+	printf("Ey: %e\n", peek.Ey);
+	printf("Ez: %e\n", peek.Ez);
+	printf("Dx: %e\n", peek.Dx);
+	printf("Dy: %e\n", peek.Dy);
+	printf("Dz: %e\n", peek.Dz);
+	printf("Hx: %e\n", peek.Hx);
+	printf("Hy: %e\n", peek.Hy);
+	printf("Hz: %e\n", peek.Hz);
+	printf("Mdx1: %e\n", peek.Mdx1);
+	printf("Mdx2: %e\n", peek.Mdx2);
+	printf("Mdx3: %e\n", peek.Mdx3);
+	printf("Mdx4: %e\n", peek.Mdx4);
+}
 
 void draw()
 {
+	//glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+	//peek(ks-1, ks-1, 20);
 	glUseProgram(my_compute_program);
 	{
 		glUniform1i(glGetUniformLocation(my_compute_program, "sim"), 0);
@@ -779,10 +899,11 @@ void draw()
 		glUniform1i(glGetUniformLocation(my_compute_program, "curstep"), curstep);
 
 		glUniform1f(glGetUniformLocation(my_compute_program, "dx"), dx);
+		glUniform1f(glGetUniformLocation(my_compute_program, "dt"), dt);
 
 		glBindImageTexture(0, textureID, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA8);
 		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo);
-		glDispatchCompute(ke, ke, ke);
+		glDispatchCompute(64, 64, 4);
 		glMemoryBarrier(GL_ALL_BARRIER_BITS);
 	}
 	glUseProgram(my_program);
@@ -798,6 +919,8 @@ void draw()
 		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);*/
 		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); 
+		//glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		//glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		//glGenerateMipmap(GL_TEXTURE_3D);
 
 		glEnable(GL_TEXTURE_3D);
@@ -835,12 +958,15 @@ void draw()
 		SwapBuffers(GetDC(wnd));
 
 		curstep++;
-
+		printf("step: %05d\n", curstep);
 	}
 }
 int WinMain(__in HINSTANCE hInstance, __in_opt HINSTANCE hPrevInstance, __in_opt LPSTR lpCmdLine, __in int nShowCmd)
 {
-
+	AllocConsole();
+	freopen("CONIN$", "r", stdin);
+	freopen("CONOUT$", "w", stdout);
+	freopen("CONOUT$", "w", stderr);
 
 	MSG msg = { 0 };
 	WNDCLASS wc = { 0 };
