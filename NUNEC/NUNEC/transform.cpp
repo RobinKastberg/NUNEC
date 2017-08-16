@@ -1,9 +1,8 @@
-
-#include "stdafx.h"
 #include "transform.h"
-#include "windows.h"
 #include "math.h"
-#include <cassert>
+#include <assert.h>
+#include <string.h>
+#include <stdio.h>
 void mat4_identity(struct mat4 *self)
 {
 	self->c[0] = 1.0f; self->c[1] = 0.0f; self->c[2] = 0.0f; self->c[3] = 0.0f;
@@ -48,7 +47,6 @@ void mat4_debug(struct mat4 *self)
 	for (int i = 0; i < 4; i++)
 	{
 		snprintf(out, 100, "%f %f %f %f\n", self->c[4 * i + 0], self->c[4 * i + 1], self->c[4 * i + 2], self->c[4 * i + 3]);
-		OutputDebugStringA(out);
 	}
 }
 

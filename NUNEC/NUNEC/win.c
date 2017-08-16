@@ -114,23 +114,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		case 'd':
 			lookrot -= 0.1f;
 			break;
-		case 'f':
-			glTranslatef(0.1, 0, 0);
-			break;
-		case 'v':
-			glTranslatef(-0.1, 0, 0);
-			break;
-		case 'g':
-			glTranslatef(0,0.1, 0);
-			break;
-		case 'b':
-			glTranslatef(0, 0.1, 0);
-			break;
-		case 'h':
-			glTranslatef(0, 0, 0.1);
-			break;
-		case 'n':
-			glTranslatef(0,0,-0.1);
 			break;
 
 		}
