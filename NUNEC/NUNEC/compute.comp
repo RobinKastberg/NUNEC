@@ -1,0 +1,131 @@
+#version 430 
+struct cell {
+    vec3 H;
+    vec3 CH;
+    vec3 CE;
+    vec3 D;
+    vec3 E;
+    vec4 mu;
+    vec4 eps;
+    vec4 Mhx;
+    vec4 Mhy;
+    vec4 Mhz;
+    vec4 Mdx;
+    vec4 Mdy;
+    vec4 Mdz;
+    vec3 ICe;
+    vec3 ICh;
+    vec3 Ih;
+    vec3 Id;
+} ;
+layout(std140, binding = 2) coherent buffer shader_data {
+    cell vertex[];
+};
+layout(local_size_x=1, local_size_y=1, local_size_z=16) in;
+layout(rgba8, location = 0) uniform image3D sim;
+uniform int ks;
+uniform int Nx;
+uniform int Ny;
+uniform int Nz;
+uniform int curstep;
+uniform float dx;
+uniform float dy;
+uniform float dz;
+uniform float c0;
+uniform float dt;
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    uint y = gl_GlobalInvocationID.y;
+    uint z = gl_GlobalInvocationID.z;
+    uint off = Ny*Nz*x + Nz*y + z;
+    float plusXEy = (x == (Nx - 1)) ? 0 : vertex[off + Ny*Nz].E.y;
+    float plusXEz = (x == (Nx - 1)) ? 0 : vertex[off + Ny*Nz].E.z;
+    float plusYEz = (y == (Ny - 1)) ? 0 : vertex[off + Nz].E.z;
+    float plusYEx = (y == (Ny - 1)) ? 0 : vertex[off + Nz].E.x;
+    float plusZEy = (z == (Nz - 1)) ? 0 : vertex[off + 1].E.y;
+    float plusZEx = (z == (Nz - 1)) ? 0 : vertex[off + 1].E.x;
+    vertex[off].CE.x = -((plusZEy - vertex[off].E.y)/dz - (plusYEz + vertex[off].E.z) / dy);
+    vertex[off].CE.y = -((plusXEz - vertex[off].E.z)/dx - (plusZEx + vertex[off].E.x) / dz);
+    vertex[off].CE.z = -((plusYEx - vertex[off].E.x)/dy - (plusXEy + vertex[off].E.y) / dx);
+    memoryBarrierBuffer();
+    barrier();
+    //float source = 6*exp(-0.5*(curstep-250.0)*(curstep-250.0)/(100000));
+    //float Hsource = sin(2*3.1415*dt*curstep*1e7)*min(100/curstep,1);
+    //float Esource = sin(2*3.1415*dt*(curstep+0.5)*1e7)*min(100/curstep,1);
+    float sig = 1e-6;
+    float t = dt*curstep - 4e-6; 
+    float t2 = dt*(curstep + 0.5) + dz/(2*c0) - 4e-6; 
+    float Esource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t/sig)*(t/sig)))*exp(-t*t/(2*sig*sig));
+    float Hsource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t2/sig)*(t2/sig)))*exp(-t2*t2/(2*sig*sig));
+    //float Esource = 1e-6*sin(2*3.14*1e4*t);
+    //float Hsource = 1e-6*sin(2*3.14*1e4*t2);
+    float Ex_src = Esource;
+    float Ey_src = Esource;
+    float Hx_src = -Hsource;
+    float Hy_src = Hsource;
+    if(z == 9 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
+        vertex[off].CE.x += Ey_src / dz;
+        vertex[off].CE.y -= Ex_src / dz;
+    }
+
+    barrier();
+    memoryBarrierBuffer();
+    barrier();
+    vertex[off].ICe += vertex[off].CE;
+    vertex[off].Ih += vertex[off].H; 
+    vertex[off].H.x = dot(vertex[off].Mhx, vec4(vertex[off].H.x, 
+                vertex[off].CE.x, 
+                vertex[off].ICe.x, 
+                vertex[off].Ih.x));
+    vertex[off].H.y = dot(vertex[off].Mhy, vec4(vertex[off].H.y, 
+                vertex[off].CE.y, 
+                vertex[off].ICe.y, 
+                vertex[off].Ih.y));
+    vertex[off].H.z = dot(vertex[off].Mhz, vec4(vertex[off].H.z, 
+                vertex[off].CE.z, 
+                vertex[off].ICe.z, 
+                vertex[off].Ih.z));
+    memoryBarrierBuffer();
+    float minXHy = (x == 0) ? 0 : vertex[off - Ny*Nz].H.y;
+    float minXHz = (x == 0) ? 0 : vertex[off - Ny*Nz].H.z;
+    float minYHz = (y == 0) ? 0 : vertex[off - Nz].H.z;
+    float minYHx = (y == 0) ? 0 : vertex[off - Nz].H.x;
+    float minZHy = (z == 0) ? 0 : vertex[off - 1].H.y;
+    float minZHx = (z == 0) ? 0 : vertex[off - 1].H.x;
+    vertex[off].CH.x = (minZHy - vertex[off].H.y)/dz  - (minYHz + vertex[off].H.z) / dy;
+    vertex[off].CH.y = (minXHz - vertex[off].H.z)/dx  - (minZHx + vertex[off].H.x) / dz;
+    vertex[off].CH.z = (minYHx - vertex[off].H.x)/dy  - (minXHy + vertex[off].H.y) / dx;
+    memoryBarrierBuffer();
+
+    //if(z == 6 && x > 20 && y > 20 && x < 44 && y < 44) {
+    if(z == 8 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
+        vertex[off].CH.x += Hy_src / dz;
+        vertex[off].CH.y -= Hx_src / dz;
+    }
+
+    memoryBarrierBuffer();
+
+    vertex[off].ICh += vertex[off].CH;
+    vertex[off].Id += vertex[off].D; 
+    vertex[off].D.x = dot(vertex[off].Mdx, vec4(vertex[off].D.x, 
+                vertex[off].CH.x, 
+                vertex[off].ICh.x, 
+                vertex[off].Id.x));
+    vertex[off].D.y = dot(vertex[off].Mdy, vec4(vertex[off].D.y, 
+                vertex[off].CH.y, 
+                vertex[off].ICh.y, 
+                vertex[off].Id.y));
+    vertex[off].D.z = dot(vertex[off].Mdz, vec4(vertex[off].D.z, 
+                vertex[off].CH.z, 
+                vertex[off].ICh.z, 
+                vertex[off].Id.z));
+    float pec = vertex[off].eps.w;
+    memoryBarrierBuffer();
+    vertex[off].E = pec * vertex[off].D / vec3(vertex[off].eps);
+    vec3 E = vertex[off].E;
+    vec3 H = vertex[off].H;
+    vec3 P = cross(E, H);
+    imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+log(1+length(P)), 20*log(1+length(E)), 20*log(1+length(H)), vertex[off].mu.w));
+    //imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+length(P), length(E), 0, 0));
+
+}

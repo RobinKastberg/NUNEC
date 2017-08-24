@@ -68,131 +68,6 @@ struct mat4 MVP;
 float lookrot = 0.0;
 float radius = 2.0;
 float looktilt = 0.5;
-const char *compute_shader = \
-                             "#version 430 \n\
-                             struct cell {\n\
-                                 vec3 H;\n\
-                                     vec3 CH;\n\
-                                     vec3 CE;\n\
-                                     vec3 D;\n\
-                                     vec3 E;\n\
-                                     vec4 mu;\n\
-                                     vec4 eps;\n\
-                                     vec4 Mhx;\n\
-                                     vec4 Mhy;\n\
-                                     vec4 Mhz;\n\
-                                     vec4 Mdx;\n\
-                                     vec4 Mdy;\n\
-                                     vec4 Mdz;\n\
-                                     vec3 ICe;\n\
-                                     vec3 ICh;\n\
-                                     vec3 Ih;\n\
-                                     vec3 Id;\n\
-                             } ;\n"\
-                             "layout(std140, binding = 2) coherent buffer shader_data {\n\
-                             cell vertex[];\n\
-                             };\n"\
-                             "layout(local_size_x=1, local_size_y=1, local_size_z=16) in;\n"\
-                             "layout(rgba8, location = 0) uniform image3D sim;\n"\
-                             "uniform int ks;\n"\
-                             "uniform int ke;\n"\
-                             "uniform int curstep;\n"\
-                             "uniform float dx;\n"\
-                             "uniform float c0;\n"\
-                             "uniform float dt;\n"\
-                             "void main() {\n"\
-                             "uint x = gl_GlobalInvocationID.x;\n"\
-                             "uint y = gl_GlobalInvocationID.y;\n"\
-                             "uint z = gl_GlobalInvocationID.z;\n"\
-                             "uint off = ke * ke * x + ke * y + z;\n"\
-                             "float plusXEy = (x == (ke - 1)) ? 0 : vertex[off + ke*ke].E.y;\n"\
-                             "float plusXEz = (x == (ke - 1)) ? 0 : vertex[off + ke*ke].E.z;\n"\
-                             "float plusYEz = (y == (ke - 1)) ? 0 : vertex[off + ke].E.z;\n"\
-                             "float plusYEx = (y == (ke - 1)) ? 0 : vertex[off + ke].E.x;\n"\
-                             "float plusZEy = (z == (ke - 1)) ? 0 : vertex[off + 1].E.y;\n"\
-                             "float plusZEx = (z == (ke - 1)) ? 0 : vertex[off + 1].E.x;\n"\
-                             "vertex[off].CE.x = -(plusZEy - vertex[off].E.y - plusYEz + vertex[off].E.z) / dx;\n"\
-                             "vertex[off].CE.y = -(plusXEz - vertex[off].E.z - plusZEx + vertex[off].E.x) / dx;\n"\
-                             "vertex[off].CE.z = -(plusYEx - vertex[off].E.x - plusXEy + vertex[off].E.y) / dx;\n"\
-                             "memoryBarrierBuffer();\n"\
-                             "barrier();\n"\
-                             "//float source = 6*exp(-0.5*(curstep-250.0)*(curstep-250.0)/(100000));\n"
-                             "//float Hsource = sin(2*3.1415*dt*curstep*1e7)*min(100/curstep,1);\n"
-                             "//float Esource = sin(2*3.1415*dt*(curstep+0.5)*1e7)*min(100/curstep,1);\n"
-                             "float sig = 1e-6;\n"
-                             "float t = dt*curstep - 4e-6; \n"
-                             "float t2 = dt*(curstep + 0.5) + dx/(2*c0) - 4e-6; \n"
-                             "float Esource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t/sig)*(t/sig)))*exp(-t*t/(2*sig*sig));\n"
-                             "float Hsource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t2/sig)*(t2/sig)))*exp(-t2*t2/(2*sig*sig));\n"
-                             "float Ex_src = Esource;\n" // E-Source
-                             "float Ey_src = Esource;\n" // H-Source
-                             "float Hx_src = -Hsource;\n" // E-Source
-                             "float Hy_src = Hsource;\n" // H-Source
-                                 "if(z == 18 && x > 20 && y > 20 && x < 44 && y < 44) {"\
-                                 "vertex[off].CE.x += Ey_src / dx;\n"\
-                                 "vertex[off].CE.y -= Ex_src / dx;\n"\
-                                 "}"
-
-                             "barrier();\n"\
-                                 "memoryBarrierBuffer();\n"\
-                                 "barrier();\n"\
-                                 "vertex[off].ICe += vertex[off].CE;\n"\
-                                 "vertex[off].Ih += vertex[off].H; \n"\
-                                 "vertex[off].H.x = dot(vertex[off].Mhx, vec4(vertex[off].H.x, \n\
-                                 vertex[off].CE.x, \n\
-                                 vertex[off].ICe.x, \n\
-                                 vertex[off].Ih.x));\n"\
-                                 "vertex[off].H.y = dot(vertex[off].Mhy, vec4(vertex[off].H.y, \n\
-                                 vertex[off].CE.y, \n\
-                                 vertex[off].ICe.y, \n\
-                                 vertex[off].Ih.y));\n"\
-                                 "vertex[off].H.z = dot(vertex[off].Mhz, vec4(vertex[off].H.z, \n\
-                                 vertex[off].CE.z, \n\
-                                 vertex[off].ICe.z, \n\
-                                 vertex[off].Ih.z));\n"\
-                                 "memoryBarrierBuffer();\n"\
-                                 "float minXHy = (x == 0) ? 0 : vertex[off - ke*ke].H.y;\n"\
-                                 "float minXHz = (x == 0) ? 0 : vertex[off - ke*ke].H.z;\n"\
-                                 "float minYHz = (y == 0) ? 0 : vertex[off - ke].H.z;\n"\
-                                 "float minYHx = (y == 0) ? 0 : vertex[off - ke].H.x;\n"\
-                                 "float minZHy = (z == 0) ? 0 : vertex[off - 1].H.y;\n"\
-                                 "float minZHx = (z == 0) ? 0 : vertex[off - 1].H.x;\n"\
-                                 "vertex[off].CH.x = (minZHy - vertex[off].H.y - minYHz + vertex[off].H.z) / dx;\n"\
-                                 "vertex[off].CH.y = (minXHz - vertex[off].H.z - minZHx + vertex[off].H.x) / dx;\n"\
-                                 "vertex[off].CH.z = (minYHx - vertex[off].H.x - minXHy + vertex[off].H.y) / dx;\n"\
-                                 "memoryBarrierBuffer();\n"\
-
-                                 "if(z == 19 && x > 20 && y > 20 && x < 44 && y < 44) {"\
-                                 "vertex[off].CH.x += Hy_src / dx;\n"\
-                                 "vertex[off].CH.y -= Hx_src / dx;\n"\
-                                 "}"
-
-                                     "memoryBarrierBuffer();\n"\
-
-                                     "vertex[off].ICh += vertex[off].CH;\n"\
-                                         "vertex[off].Id += vertex[off].D; \n"\
-                                         "vertex[off].D.x = dot(vertex[off].Mdx, vec4(vertex[off].D.x, \n\
-                                         vertex[off].CH.x, \n\
-                                         vertex[off].ICh.x, \n\
-                                         vertex[off].Id.x));\n"\
-                                         "vertex[off].D.y = dot(vertex[off].Mdy, vec4(vertex[off].D.y, \n\
-                                         vertex[off].CH.y, \n\
-                                         vertex[off].ICh.y, \n\
-                                         vertex[off].Id.y));\n"\
-                                         "vertex[off].D.z = dot(vertex[off].Mdz, vec4(vertex[off].D.z, \n\
-                                         vertex[off].CH.z, \n\
-                                         vertex[off].ICh.z, \n\
-                                         vertex[off].Id.z));\n"\
-                                         "float pec = vertex[off].eps.w;\n"\
-                                         "memoryBarrierBuffer();\n"\
-                                         "vertex[off].E = pec * vertex[off].D / vec3(vertex[off].eps);\n"\
-                                         "vec3 E = vertex[off].E;\n"\
-                                         "vec3 H = vertex[off].H;\n"\
-                                         "vec3 P = 300*cross(E, H);\n"\
-                                         "imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+log(1+length(P)), 20*log(1+length(E)), 20*log(1+length(H)), vertex[off].mu.w));\n"\
-                                         "//imageStore(sim, ivec3(gl_GlobalInvocationID), vec4(100*vertex[off].mu.w+length(P), length(E), 0, 0));\n"\
-                                         ""\
-                                         "}";
 
 const char *vert_shader = \
                           "#version 330 core\n"\
@@ -286,22 +161,26 @@ static const GLfloat g_vertex_buffer_data[] = {
     1.0f,-1.0f, 1.0f
 };
 
-#define ke 64
-#define bsize ((ke)*(ke)*(ke)*sizeof(struct cell))
+const int Nx = 60;
+const int Ny = 100;
+const int Nz = 16;
+#define bsize ((Nx)*(Ny)*(Nz)*sizeof(struct cell))
 int nsteps = 100;
 int ks = 32;
 
 float c0 = 1;
 float frmax = 1e6;
 float dx = 1e-7; //  c0 / (frmax * 100);
+float dy = 1e-7; //  c0 / (frmax * 100);
+float dz = 1e-7; //  c0 / (frmax * 100);
 float dt;
 float eps = 1;
 float mu = 1;
 
 float Ca, Cb, Da, Db;
 
-struct cell (*sim)[ke][ke][ke];
-struct cell(*sim_gpu)[ke][ke][ke];
+struct cell (*sim)[Nx][Ny][Nz];
+struct cell(*sim_gpu)[Nx][Ny][Nz];
 
 int curstep = 0;
 
@@ -314,12 +193,13 @@ GLenum my_fragment_shader;
 GLenum my_compute_shader;
 GLenum my_compute_program;
 
-float tex2D[ke][ke][ke][4];
+float tex2D[Nx][Ny][Nz][4];
 vec3 lookat = vec3{ 0, 0, 0 };
 vec3 up = vec3{ 0, 0, 1 };
 int L = 16;
 float pml(int k)
 {
+    /*
     int NXLO = L - 1;
     int NXHI = ke - 1 - L;
     if (k < (L))
@@ -330,59 +210,32 @@ float pml(int k)
         k = 0;
 
     k = abs(k);
-
-    return pow(k / L, 3.0);
-}
-float pmlD(int k)
-{
-    int NXLO = L - 1 ;
-    int NXHI = ke - 1 - L;
-    if (k < (L))
-        k = (k - L);
-    else if (k > (ke - 1 - L))
-        k = k - (ke - 1 - L);
-    else
-        k = 0;
-
-    k = abs(k);
-
-    return (eps / (2*dt))*pow(k/L, 3.0);
-}
-float pmlH(int k)
-{
-    int NXLO = L - 1;
-    int NXHI = ke - 1 - L;
-    if (k < (L))
-        k = (k - L);
-    else if (k >(ke - 1 - L))
-        k = k - (ke - 1 - L);
-    else
-        k = 0;
-
-    k = abs(k);
-
-    return (eps / (2 *dt))*pow(k / L, 3.0);
+    float s = (float)k/L;
+    */
+    return 0;
+    //return (eps / (2*dt))*s*s*s;
 }
 GLuint ssbo;
 
 void init()
 {
 	printf("INIT()\n");
-    sim = (cell (*)[ke][ke][ke])malloc(bsize);
+    sim = (cell (*)[Nx][Ny][Nz])malloc(bsize);
     //omp_set_dynamic(0);
     //omp_set_num_threads(4);
     glGenBuffers(1, &ssbo);
 	printf("glgenbuffers()\n");
 
 
-    dt = dx / (10*sqrtf(3.0f) * c0);
+    dt = dx / (100.0f * c0);
+    //dt = 1;
     //dt = 1.6678e-10;
     //dt = dx;
     bzero(sim, bsize);
 
-    for (int x = 0; x < ke; x++) {
-        for (int y = 0; y < ke; y++) {
-            for (int z = 0; z < ke; z++) {
+    for (int x = 0; x < Nx; x++) {
+        for (int y = 0; y < Ny; y++) {
+            for (int z = 0; z < Nz; z++) {
                 float px = 0, py = 0, pz = 0;
                 float rhoHx = 0, rhoHy = 0, rhoHz = 0;
                 float rhoDx = 0, rhoDy = 0, rhoDz = 0;
@@ -399,31 +252,39 @@ void init()
                    }*/
                 //else {
                 // TODO: Fungerar inte än.
-                rhoHx = pmlH(x); //  pml(x);
-                rhoHy = pmlH(y); //  pml(x);
-                rhoHz = pmlH(z); //  pml(x);
+                rhoHx = pml(x); //  pml(x);
+                rhoHy = pml(y); //  pml(x);
+                rhoHz = pml(z); //  pml(x);
 
-                rhoDx = pmlD(x); //  pml(x);
-                rhoDy = pmlD(y); //  pml(x);
-                rhoDz = pmlD(z); //  pml(x);
+                rhoDx = pml(x); //  pml(x);
+                rhoDy = pml(y); //  pml(x);
+                rhoDz = pml(z); //  pml(x);
                 //}
 
                 (*sim)[x][y][z].pec = 1;					
-                (*sim)[x][y][z].epsxx = 1;
-                (*sim)[x][y][z].epsyy = 1;
-                (*sim)[x][y][z].epszz = 1;
-                (*sim)[x][y][z].muxx = 1;
-                (*sim)[x][y][z].muyy = 1;
-                (*sim)[x][y][z].muzz = 1;
+                (*sim)[x][y][z].epsxx = eps;
+                (*sim)[x][y][z].epsyy = eps;
+                (*sim)[x][y][z].epszz = eps;
+                (*sim)[x][y][z].muxx = mu;
+                (*sim)[x][y][z].muyy = mu;
+                (*sim)[x][y][z].muzz = mu;
                 //(*sim)[x][y][z].mat = (pml(y)+ pml(x) + pml(z))*0.5;
 
-                if ((x-ks)*(x-ks)/3.0 + 6*(y-ks)*(y-ks)+6*(z-ks)*(z-ks) < 100.0) {
-                    (*sim)[x][y][z].epsxx = 1e5;
-                    (*sim)[x][y][z].epsyy = 1e5;
-                    (*sim)[x][y][z].epszz = 1e5;
-                    (*sim)[x][y][z].mat = 1;
-                    (*sim)[x][y][z].pec = 0;
+                if (z <= 2) {
+                    (*sim)[x][y][z].epsxx = 2.2*eps;
+                    (*sim)[x][y][z].epsyy = 2.2*eps;
+                    (*sim)[x][y][z].epszz = 2.2*eps;
+                    (*sim)[x][y][z].mat = 0.2;
+                    (*sim)[x][y][z].pec = 1;
 
+                }
+                if(z == 3 && abs(x-30) < 16 && abs(y-50) < 20) {
+                    (*sim)[x][y][z].pec = 0;
+                    (*sim)[x][y][z].mat = 2;
+                }
+                if(z == 3 && (x >= 20 && x <= 25) && y < 50) {
+                    (*sim)[x][y][z].pec = 0;
+                    (*sim)[x][y][z].mat = 2;
                 }
 
 
@@ -521,7 +382,8 @@ void init()
 
     glGenTextures(1, &textureID);
     glBindTexture(GL_TEXTURE_3D, textureID);
-    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA, ke, ke, ke, 0, GL_RGBA, GL_FLOAT, tex2D);
+    glTexImage3D(GL_TEXTURE_3D, 0, GL_RGBA, Nx, Ny, Nz, 0, GL_RGBA, GL_FLOAT, tex2D);
+    
 
     glGenVertexArrays(1, &VertexArrayID);
     glBindVertexArray(VertexArrayID);
@@ -541,10 +403,14 @@ void init()
     my_fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
     my_compute_shader = glCreateShader(GL_COMPUTE_SHADER);
 
+    char shader_buf[1 << 16];
+    char *ptr = shader_buf;
+    FILE *fp = fopen("compute.comp", "r");
+    fread(shader_buf, 1, 1 << 16, fp);
     // Load Shader Sources
     glShaderSource(my_vertex_shader, 1, &vert_shader, NULL);
     glShaderSource(my_fragment_shader, 1, &frag_shader, NULL);
-    glShaderSource(my_compute_shader, 1, &compute_shader, NULL);
+    glShaderSource(my_compute_shader, 1, &ptr, NULL);
 
     // Compile The Shaders
     glCompileShader(my_vertex_shader);
@@ -628,243 +494,18 @@ void init()
     free(sim);
 }
 
-void step()
-{
-    /*
-#pragma omp parallel for
-for (int x = 0; x < ke ; x++) {
-for (int y = 0; y < ke - 1 ; y++) {
-for (int z = 0; z < ke - 1 ; z++) {
-sim[x][y][z].CEx = -(sim[x][y][z + 1].Ey - sim[x][y][z].Ey - sim[x][y + 1][z].Ez + sim[x][y][z].Ez) / dx;
-}
-sim[x][y][ke-1].CEx = -(0 - sim[x][y][ke-1].Ey - sim[x][y + 1][ke-1].Ez + sim[x][y][ke-1].Ez) / dx;
-}
-for (int z = 0; z < ke - 1; z++) {
-sim[x][ke-1][z].CEx = -(sim[x][ke-1][z + 1].Ey - sim[x][ke-1][z].Ey - 0 + sim[x][ke-1][z].Ez) / dx;
-}
-
-sim[x][ke - 1][ke - 1].CEx = -(0 - sim[x][ke-1][ke-1].Ey - 0 + sim[x][ke-1][ke-1].Ez) / dx;
-
-}
-#pragma omp parallel for
-for (int y = 0; y < ke; y++) {
-for (int x = 0; x < ke - 1; x++) {
-for (int z = 0; z < ke - 1; z++) {
-sim[x][y][z].CEy = -(sim[x + 1][y][z].Ez - sim[x][y][z].Ez - sim[x][y][z + 1].Ex + sim[x][y][z].Ex) / dx;
-}
-sim[x][y][ke - 1].CEy = -(sim[x + 1][y][ke-1].Ez - sim[x][y][ke-1].Ez - 0 + sim[x][y][ke-1].Ex) / dx;
-}
-for (int z = 0; z < ke - 1; z++) {
-sim[ke-1][y][z].CEy = -(0 - sim[ke-1][y][z].Ez - sim[ke-1][y][z + 1].Ex + sim[ke-1][y][z].Ex) / dx;
-}
-
-sim[ke - 1][y][ke - 1].CEy = -(0 - sim[ke-1][y][ke-1].Ez - 0 + sim[ke-1][y][ke-1].Ex) / dx;
-
-}
-#pragma omp parallel for
-for (int z = 0; z < ke; z++) {
-for (int x = 0; x < ke - 1; x++) {
-for (int y = 0; y < ke - 1; y++) {
-sim[x][y][z].CEz = -(sim[x][y + 1][z].Ex - sim[x][y][z].Ex - sim[x + 1][y][z].Ey + sim[x][y][z].Ey) / dx;
-}
-sim[x][ke-1][z].CEz = -(0 - sim[x][ke-1][z].Ex - sim[x + 1][ke-1][z].Ey + sim[x][ke-1][z].Ey) / dx;
-}
-for (int y = 0; y < ke - 1; y++) {
-sim[ke - 1][y][z].CEz = -(sim[ke - 1][y + 1][z].Ex - sim[ke -1 ][y][z].Ex - 0 + sim[ke-1][y][z].Ey) / dx;
-}
-
-sim[ke-1][ke - 1][z].CEz = -(0 - sim[ke-1][ke-1][z].Ex - 0 + sim[ke-1][ke-1][z].Ey) / dx;
-
-}
-#pragma omp parallel for
-for (int x = 0; x < ke; x++) {
-for (int y = 0; y < ke; y++) {
-for (int z = 0; z < ke; z++) {
-
-sim[x][y][z].ICex += sim[x][y][z].CEx;
-sim[x][y][z].ICey += sim[x][y][z].CEy;
-sim[x][y][z].ICez += sim[x][y][z].CEz;
-
-
-sim[x][y][z].Ihx += sim[x][y][z].Hx;
-sim[x][y][z].Ihy += sim[x][y][z].Hy;
-sim[x][y][z].Ihz += sim[x][y][z].Hz;
-}
-}
-}
-// CURL H
-#pragma omp parallel for
-for (int x = 0; x < ke; x++) {
-for (int y = 0; y < ke; y++) {
-for (int z = 0; z < ke; z++) {
-
-
-sim[x][y][z].Hx = sim[x][y][z].Mhx1 * sim[x][y][z].Hx
-+ sim[x][y][z].Mhx2 * sim[x][y][z].CEx
-    + sim[x][y][z].Mhx3 * sim[x][y][z].ICex
-        + sim[x][y][z].Mhx4 * sim[x][y][z].Ihx;
-
-    sim[x][y][z].Hy = sim[x][y][z].Mhy1 * sim[x][y][z].Hy
-        + sim[x][y][z].Mhy2 * sim[x][y][z].CEy
-        + sim[x][y][z].Mhy3 * sim[x][y][z].ICey
-        + sim[x][y][z].Mhy4 * sim[x][y][z].Ihy;
-
-    sim[x][y][z].Hz = sim[x][y][z].Mhz1 * sim[x][y][z].Hz
-        + sim[x][y][z].Mhz2 * sim[x][y][z].CEz
-        + sim[x][y][z].Mhz3 * sim[x][y][z].ICez
-        + sim[x][y][z].Mhz4 * sim[x][y][z].Ihz;
-
-
-}
-}
-}
-
-
-#pragma omp parallel for
-for (int x = 0; x < ke; x++) {
-    sim[x][0][0].CHx = (0 - sim[x][0][0].Hy - 0 + sim[x][0][0].Hz) / dx;
-
-    for (int z = 1; z < ke; z++) {
-        sim[x][0][z].CHx = (sim[x][0][z - 1].Hy - sim[x][0][z].Hy - 0 + sim[x][0][z].Hz) / dx;
-    }
-    for (int y = 1; y < ke; y++) {
-        sim[x][y][0].CHx = (0 - sim[x][y][0].Hy - sim[x][y - 1][0].Hz + sim[x][y][0].Hz) / dx;
-        for (int z = 1; z < ke; z++) {
-            sim[x][y][z].CHx = (sim[x][y][z - 1].Hy - sim[x][y][z].Hy - sim[x][y - 1][z].Hz + sim[x][y][z].Hz) / dx;
-        }
-    }
-}
-#pragma omp parallel for
-for (int y = 0; y < ke; y++) {
-    sim[0][y][0].CHy = (0 - sim[0][y][0].Hz - 0 + sim[0][y][0].Hx) / dx;
-    for (int z = 1; z < ke; z++) {
-        sim[0][y][z].CHy = (0 - sim[0][y][z].Hz - sim[0][y][z - 1].Hx + sim[0][y][z].Hx) / dx;
-    }
-    for (int x = 1; x < ke; x++) {
-        sim[x][y][0].CHy = (sim[x - 1][y][0].Hz - sim[x][y][0].Hz - 0 + sim[x][y][0].Hx) / dx;
-
-        for (int z = 1; z < ke; z++) {
-            sim[x][y][z].CHy = (sim[x - 1][y][z].Hz - sim[x][y][z].Hz - sim[x][y][z - 1].Hx + sim[x][y][z].Hx) / dx;
-        }
-    }
-}
-#pragma omp parallel for
-for (int z = 0; z < ke; z++) {
-    sim[0][0][z].CHz = (0 - sim[0][0][z].Hx - 0 + sim[0][0][z].Hy) / dx;
-
-    for (int y = 1; y < ke; y++) {
-        sim[0][y][z].CHz = (sim[0][y - 1][z].Hx - sim[0][y][z].Hx - 0 + sim[0][y][z].Hy) / dx;
-    }
-    for (int x = 1; x < ke; x++) {
-        sim[x][0][z].CHz = (0 - sim[x][0][z].Hx - sim[x - 1][0][z].Hy + sim[x][0][z].Hy) / dx;
-
-        for (int y = 1; y < ke; y++) {
-            sim[x][y][z].CHz = (sim[x][y - 1][z].Hx - sim[x][y][z].Hx - sim[x - 1][y][z].Hy + sim[x][y][z].Hy) / dx;
-        }
-    }
-
-
-}
-
-#pragma omp parallel for
-for (int x = 1; x < ke - 1; x++) {
-    for (int y = 1; y < ke - 1; y++) {
-        for (int z = 1; z < ke - 1; z++) {
-
-            sim[x][y][z].IChx += sim[x][y][z].CHx;
-            sim[x][y][z].IChy += sim[x][y][z].CHy;
-            sim[x][y][z].IChz += sim[x][y][z].CHz;
-
-            sim[x][y][z].Idx += sim[x][y][z].Dx;
-            sim[x][y][z].Idy += sim[x][y][z].Dy;
-            sim[x][y][z].Idz += sim[x][y][z].Dz;
-        }
-    }
-}
-
-int wl = 20;
-/*
-   if (curstep == 1)
-   {
-   jz[ks][ks][ks] = 10;
-   jz[ks+1][ks][ks] = 15;
-   }	else  if(curstep == 2){
-   jz[ks][ks][ks] = -10;
-   jz[ks + 1][ks][ks] = -15;
-   }*/
-/*
-#pragma omp parallel for
-for (int x = 0; x < ke ; x++) {
-for (int y = 0; y < ke ; y++) {
-for (int z = 0; z < ke ; z++) {
-
-sim[x][y][z].Dx = sim[x][y][z].Mdx1 * sim[x][y][z].Dx
-+ sim[x][y][z].Mdx2 * sim[x][y][z].CHx
-+ sim[x][y][z].Mdx3 * sim[x][y][z].IChx
-+ sim[x][y][z].Mdx4 * sim[x][y][z].Idx;
-
-
-sim[x][y][z].Dy = sim[x][y][z].Mdy1 * sim[x][y][z].Dy
-+ sim[x][y][z].Mdy2 * sim[x][y][z].CHy
-+ sim[x][y][z].Mdy3 * sim[x][y][z].IChy
-+ sim[x][y][z].Mdy4 * sim[x][y][z].Idy;
-
-sim[x][y][z].Dz = sim[x][y][z].Mdz1 * sim[x][y][z].Dz
-+ sim[x][y][z].Mdz2 * sim[x][y][z].CHz
-+ sim[x][y][z].Mdz3 * sim[x][y][z].IChz
-+ sim[x][y][z].Mdz4 * sim[x][y][z].Idz
-- jz[x][y][z];
-
-sim[x][y][z].Ex = sim[x][y][z].Dx / sim[x][y][z].epsxx;
-sim[x][y][z].Ey = sim[x][y][z].Dy / sim[x][y][z].epsyy;
-sim[x][y][z].Ez = sim[x][y][z].Dz / sim[x][y][z].epszz;
-
-
-
-}
-}
-}
-
-int x = ks;
-float minimume= 99999;
-float maximume = -99999;
-float minimumh = 99999;
-float maximumh = -99999;
-
-for (int x = 0 ; x < ke; x++)
-{
-for (int y = 0; y < ke; y++) {
-for (int z = 0; z < ke; z++) {
-if (y == ks && z == ks)
-{
-tex2D[x - 1][y - 1][z - 1][0] = 0;
-tex2D[x - 1][y - 1][z - 1][1] = 0;
-continue;
-}
-tex2D[x][y][z][0] = 1 + sim[x][y][z].Mhx2;
-
-//float emag = log(1+sqrtf(ex[x][y][z] * ex[x][y][z] + ey[x][y][z] * ey[x][y][z] + ez[x][y][z] * ez[x][y][z]));
-//float hmag = log(1+sqrtf(hx[x][y][z] * hx[x][y][z] + hy[x][y][z] * hy[x][y][z] + hz[x][y][z] * hz[x][y][z]));
-vec3 E = vec3{ sim[x][y][z].Ex, sim[x][y][z].Ey, sim[x][y][z].Ez };
-vec3 H = vec3{ sim[x][y][z].Hx, sim[x][y][z].Hy, sim[x][y][z].Hx };
-vec3 c = vec3_cross(&E, &H);
-float mag = sqrtf(dot(&c, &c));
-tex2D[x][y][z][0] = 100 * log(1+mag);
-
-tex2D[x][y][z][1] = 100 * log(1 + sqrtf(dot(&E, &E)));
-tex2D[x][y][z][2] = 100 * log(1 + sqrtf(dot(&H, &H)));				
-}
-}
-}
-
- */
-}
 FILE *pipe;
 void peek(int x, int y, int z)
 {
     struct cell peek;
-    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, (ke*ke*x + ke*y + z)*sizeof(struct cell), sizeof(struct cell), (void *)&peek);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, (Nz*Ny*x + Nz*y + z)*sizeof(struct cell), sizeof(struct cell), (void *)&peek);
     printf("CELL: (%02d,%02d,%02d)\n", x, y, z);
+    printf("CHx: %f\n", peek.CHx);
+    printf("CHy: %e\n", peek.CHy);
+    printf("CHz: %e\n", peek.CHz);
+    printf("CEx: %f\n", peek.CEx);
+    printf("CEy: %e\n", peek.CEy);
+    printf("CEz: %e\n", peek.CEz);
     printf("Ex: %f\n", peek.Ex);
     printf("Ey: %e\n", peek.Ey);
     printf("Ez: %e\n", peek.Ez);
@@ -878,31 +519,54 @@ void peek(int x, int y, int z)
     printf("Mdx2: %e\n", peek.Mdx2);
     printf("Mdx3: %e\n", peek.Mdx3);
     printf("Mdx4: %e\n", peek.Mdx4);
+    printf("Mhx1: %e\n", peek.Mhx1);
+    printf("Mhx2: %e\n", peek.Mhx2);
+    printf("Mhx3: %e\n", peek.Mhx3);
+    printf("Mhx4: %e\n", peek.Mhx4);
+    printf("ICex: %e\n", peek.ICex);
+    printf("ICey: %e\n", peek.ICey);
+    printf("ICez: %e\n", peek.ICez);
+    printf("IChx: %e\n", peek.IChx);
+    printf("IChy: %e\n", peek.IChy);
+    printf("IChz: %e\n", peek.IChz);
+    printf("Ihx: %e\n", peek.Ihx);
+    printf("Ihy: %e\n", peek.Ihy);
+    printf("Ihz: %e\n", peek.Ihz);
+    printf("Idx: %e\n", peek.Ihx);
+    printf("Idy: %e\n", peek.Ihy);
+    printf("Idz: %e\n", peek.Ihz);
+    printf("muxx: %e\n", peek.muxx);
+    printf("muyy: %e\n", peek.muyy);
+    printf("muzz: %e\n", peek.muzz);
+    printf("epsxx: %e\n", peek.epsxx);
+    printf("epsyy: %e\n", peek.epsyy);
+    printf("epszz: %e\n", peek.epszz);
 }
 
 void draw()
 {
-    float t = dt*curstep - 1e-7;
-    float sig = 1e-8;
-    float Esource = (2.0/(sqrt(3.0*sig)*1.3313))*(1.0-((t/sig)*(t/sig)))*exp(-t*t/(2.0*sig*sig));
+    float t = dt*curstep; 
     printf("t: %e\n", t);
-    printf("ES: %e\n", Esource);
     //glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    //peek(ks-1, ks-1, 20);
+    peek(30,50,8);
     glUseProgram(my_compute_program);
     {
         glUniform1i(glGetUniformLocation(my_compute_program, "sim"), 0);
         glUniform1i(glGetUniformLocation(my_compute_program, "ks"), ks);
-        glUniform1i(glGetUniformLocation(my_compute_program, "ke"), ke);
+        glUniform1i(glGetUniformLocation(my_compute_program, "Nx"), Nx);
+        glUniform1i(glGetUniformLocation(my_compute_program, "Ny"), Ny);
+        glUniform1i(glGetUniformLocation(my_compute_program, "Nz"), Nz);
         glUniform1i(glGetUniformLocation(my_compute_program, "curstep"), curstep);
 
         glUniform1f(glGetUniformLocation(my_compute_program, "dx"), dx);
+        glUniform1f(glGetUniformLocation(my_compute_program, "dy"), dy);
+        glUniform1f(glGetUniformLocation(my_compute_program, "dz"), dz);
         glUniform1f(glGetUniformLocation(my_compute_program, "dt"), dt);
         glUniform1f(glGetUniformLocation(my_compute_program, "c0"), c0);
 
         glBindImageTexture(0, textureID, 0, GL_TRUE, 0, GL_READ_WRITE, GL_RGBA8);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, ssbo);
-        glDispatchCompute(64, 64, 4);
+        glDispatchCompute(Nx, Ny, Nz/16);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
     }
     glUseProgram(my_program);
@@ -918,6 +582,10 @@ void draw()
           glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);*/
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); 
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
         //glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         //glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
         //glGenerateMipmap(GL_TEXTURE_3D);
