@@ -55,15 +55,15 @@ void main() {
     float sig = 1e-6;
     float t = dt*curstep - 4e-6; 
     float t2 = dt*(curstep + 0.5) + dz/(2*c0) - 4e-6; 
-    float Esource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t/sig)*(t/sig)))*exp(-t*t/(2*sig*sig));
-    float Hsource = 0.0001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t2/sig)*(t2/sig)))*exp(-t2*t2/(2*sig*sig));
+    float Esource = 0.000000000001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t/sig)*(t/sig)))*exp(-t*t/(2*sig*sig));
+    float Hsource = 0.000000000001*(2.0/(sqrt(3*sig)*1.3313))*(1-((t2/sig)*(t2/sig)))*exp(-t2*t2/(2*sig*sig));
     //float Esource = 1e-6*sin(2*3.14*1e4*t);
     //float Hsource = 1e-6*sin(2*3.14*1e4*t2);
     float Ex_src = Esource;
     float Ey_src = Esource;
     float Hx_src = -Hsource;
     float Hy_src = Hsource;
-    if(z == 9 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
+    if(z == 8 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
         vertex[off].CE.x += Ey_src / dz;
         vertex[off].CE.y -= Ex_src / dz;
     }
@@ -98,7 +98,7 @@ void main() {
     memoryBarrierBuffer();
 
     //if(z == 6 && x > 20 && y > 20 && x < 44 && y < 44) {
-    if(z == 8 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
+    if(z == 9 && x >= 20 && x <= 25 && x >= 20 && y <= 25) {
         vertex[off].CH.x += Hy_src / dz;
         vertex[off].CH.y -= Hx_src / dz;
     }

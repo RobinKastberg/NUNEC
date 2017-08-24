@@ -38,5 +38,13 @@
     <ClCompile Include="transform.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="win.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="compute.comp">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

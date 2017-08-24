@@ -1,18 +1,16 @@
+#define _CRT_SECURE_NO_WARNINGS
 #include "transform.h"
 #include "omp.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <strings.h>
+
 #include <string.h>
 #include <math.h>
 #define GLEW_STATIC
 #include "glew.h"
 #include <GL/gl.h>
-#include <GL/glx.h>
-#include <X11/keysym.h>
-#include <X11/Xutil.h>
-#include <X11/Xlib.h>
 
+#define WINDOWS
 
 
 void swap();
@@ -20,6 +18,11 @@ void swap();
 #ifdef WINDOWS
 __declspec(align(16)) struct cell {
 #else
+#include <GL/glx.h>
+#include <strings.h>
+#include <X11/keysym.h>
+#include <X11/Xutil.h>
+#include <X11/Xlib.h>
     struct cell {
 #endif
         // H-field
@@ -170,9 +173,9 @@ int ks = 32;
 
 float c0 = 1;
 float frmax = 1e6;
-float dx = 1e-7; //  c0 / (frmax * 100);
-float dy = 1e-7; //  c0 / (frmax * 100);
-float dz = 1e-7; //  c0 / (frmax * 100);
+float dx = 1e-10; //  c0 / (frmax * 100);
+float dy = 1e-10; //  c0 / (frmax * 100);
+float dz = 1e-10; //  c0 / (frmax * 100);
 float dt;
 float eps = 1;
 float mu = 1;
@@ -231,7 +234,7 @@ void init()
     //dt = 1;
     //dt = 1.6678e-10;
     //dt = dx;
-    bzero(sim, bsize);
+    memset(sim, 0, bsize);
 
     for (int x = 0; x < Nx; x++) {
         for (int y = 0; y < Ny; y++) {
@@ -269,7 +272,7 @@ void init()
                 (*sim)[x][y][z].muyy = mu;
                 (*sim)[x][y][z].muzz = mu;
                 //(*sim)[x][y][z].mat = (pml(y)+ pml(x) + pml(z))*0.5;
-
+				/*
                 if (z <= 2) {
                     (*sim)[x][y][z].epsxx = 2.2*eps;
                     (*sim)[x][y][z].epsyy = 2.2*eps;
@@ -286,7 +289,7 @@ void init()
                     (*sim)[x][y][z].pec = 0;
                     (*sim)[x][y][z].mat = 2;
                 }
-
+				*/
 
 
 
@@ -406,7 +409,8 @@ void init()
     char shader_buf[1 << 16];
     char *ptr = shader_buf;
     FILE *fp = fopen("compute.comp", "r");
-    fread(shader_buf, 1, 1 << 16, fp);
+    int read = fread(shader_buf, 1, 1 << 16, fp);
+	shader_buf[read] = '\0';
     // Load Shader Sources
     glShaderSource(my_vertex_shader, 1, &vert_shader, NULL);
     glShaderSource(my_fragment_shader, 1, &frag_shader, NULL);
@@ -468,6 +472,22 @@ void init()
         return;
     }
 
+	glGetShaderiv(my_compute_shader, GL_LINK_STATUS, &isCompiled);
+
+	if (isCompiled == GL_FALSE)
+	{
+		GLint maxLength = 0;
+		glGetShaderiv(my_compute_shader, GL_INFO_LOG_LENGTH, &maxLength);
+
+		// The maxLength includes the NULL character
+		glGetShaderInfoLog(my_compute_shader, maxLength, &maxLength, &errorLog[0]);
+		printf("%s\n", errorLog);
+
+		// Provide the infolog in whatever manor you deem best.
+		// Exit with failure.
+		//glDeleteShader(shader); // Don't leak the shader.
+		return;
+	}
 
     // Attach The Shader Objects To The Program Object
     glAttachObjectARB(my_program, my_vertex_shader);
@@ -542,13 +562,14 @@ void peek(int x, int y, int z)
     printf("epsyy: %e\n", peek.epsyy);
     printf("epszz: %e\n", peek.epszz);
 }
+void swap();
 
 void draw()
 {
     float t = dt*curstep; 
     printf("t: %e\n", t);
     //glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-    peek(30,50,8);
+    //peek(30,50,8);
     glUseProgram(my_compute_program);
     {
         glUniform1i(glGetUniformLocation(my_compute_program, "sim"), 0);
@@ -625,6 +646,7 @@ void draw()
 
         curstep++;
         printf("step: %05d\n", curstep);
+#ifndef WINDOWS
         if(curstep == 1)
         {
             pipe = popen("ffmpeg -y -f rawvideo -vcodec rawvideo -s 640x480 -pix_fmt rgb24 -r 60 -i - -an -vf vflip output.mp4", "w");
@@ -633,19 +655,22 @@ void draw()
             glReadPixels(0,0,width, height, GL_RGB, GL_UNSIGNED_BYTE, buf);
             fwrite(buf, 3, width*height, pipe);
         }
+#endif
     }
 }
+void resize()
+{
+	glViewport(0, 0, width, height);
+	mat4_perspective(&P, 90.0, (float)width / height, 0.001, 100);
+}
+#ifndef WINDOWS
 Display *dpy;
 Window glwin;
 void swap()
 {
         glXSwapBuffers(dpy, glwin);
 }
-void resize()
-{
-    glViewport(0, 0, width, height);
-    mat4_perspective(&P, 90.0, (float)width / height, 0.001, 100);
-}
+
 static Bool WaitForMapNotify(Display *d, XEvent *e, char *arg) 
 { 
     if ((e->type == MapNotify) && (e->xmap.window == (Window)arg)) { 
@@ -770,3 +795,4 @@ int main(int argc, char **argv)
     }
     return 0;
 }
+#endif

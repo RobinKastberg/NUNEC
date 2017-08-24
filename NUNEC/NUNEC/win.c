@@ -1,9 +1,24 @@
 #define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
 #include <windows.h>
+#define GLEW_STATIC
+#include "glew.h"
 #pragma comment (lib, "opengl32.lib")
 #pragma comment (lib, "glew\\glew32s.lib")
 HWND wnd;
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+extern float lookrot;
+extern float radius;
+extern float looktilt;
+extern int width;
+extern int height;
+void draw();
+void init();
+void resize();
+
 void swap()
 {
 		SwapBuffers(GetDC(wnd));
@@ -82,11 +97,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		HGLRC ourOpenGLRenderingContext = wglCreateContext(ourWindowHandleToDeviceContext);
 		wglMakeCurrent(ourWindowHandleToDeviceContext, ourOpenGLRenderingContext);
 
-		//glewExperimental = GL_TRUE;
+		glewExperimental = GL_TRUE;
 		int ginit = glewInit();
 		//MessageBoxA(0, glewGetErrorString(ginit), "OPENGL VERSION", 0);
 
-
+		glEnable(GL_DEBUG_OUTPUT);
 		//glViewport(0, 0, 100, 100);
 		//MessageBoxA(0, (char*)glGetString(GL_VERSION), "OPENGL VERSION", 0);
 		init();
